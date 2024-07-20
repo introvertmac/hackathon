@@ -1,33 +1,78 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
-:root {
-  --foreground-rgb: 0, 0, 0;
-  --background-start-rgb: 214, 219, 220;
-  --background-end-rgb: 255, 255, 255;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --foreground-rgb: 255, 255, 255;
-    --background-start-rgb: 0, 0, 0;
-    --background-end-rgb: 0, 0, 0;
-  }
-}
-
 body {
-  color: rgb(var(--foreground-rgb));
-  background: linear-gradient(
-      to bottom,
-      transparent,
-      rgb(var(--background-end-rgb))
-    )
-    rgb(var(--background-start-rgb));
+  margin: 0;
+  padding: 0;
+  font-family: 'Chivo', sans-serif;
+  background-color: #fff;
+  height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  position: relative;
 }
 
-@layer utilities {
-  .text-balance {
-    text-wrap: balance;
+.loading-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.logo-text {
+  font-size: 48px;
+  font-weight: 700;
+  font-style: italic;
+  color: #0051fe;
+  margin-right: 20px;
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.loading-blinker {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background-color: #0051fe;
+  animation: blink 1s infinite;
+}
+
+.connect-link {
+  position: absolute;
+  bottom: 20px;
+  right: 20px;
+  font-size: 16px;
+}
+
+.connect-link a {
+  color: #0051fe;
+  text-decoration: none;
+  font-weight: 700;
+  padding: 8px 16px;
+  border: 2px solid #0051fe;
+  border-radius: 20px;
+  transition: all 0.3s ease;
+}
+
+.connect-link a:hover {
+  background-color: #0051fe;
+  color: #fff;
+}
+
+@keyframes blink {
+  0% { opacity: 1; }
+  50% { opacity: 0.2; }
+  100% { opacity: 1; }
+}
+
+@media (max-width: 768px) {
+  .logo-text {
+    font-size: 36px;
+    margin-right: 10px;
+  }
+  .loading-blinker {
+    width: 24px;
+    height: 24px;
+  }
+  .connect-link {
+    bottom: 10px;
+    right: 10px;
+    font-size: 14px;
   }
 }
