@@ -18,7 +18,7 @@ import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 const generateSVG = (avatar: string, traits: string[], transactionCount: number, tokenCount: number) => {
   const colors: { [key: string]: string } = {
     "Solana Newbie": "#9945FF",
-    "Active Trader": "#14F195",
+    "Active Hunter": "#14F195",
     "Token Collector": "#00C2FF",
     "NFT Enthusiast": "#FF9C00",
     "DeFi Explorer": "#FF3B3B",
@@ -79,7 +79,7 @@ export const POST = async (req: Request) => {
     let traits = [];
 
     if (transactions.length >= 50) {
-      avatar = "Active Trader";
+      avatar = "Active hunter";
       traits.push("High transaction volume");
     }
 
