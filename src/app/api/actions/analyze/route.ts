@@ -80,7 +80,7 @@ export const POST = async (req: Request) => {
 
     if (transactions.length >= 50) {
       avatar = "Active Hunter";
-      traits.push("High transactions numbers");
+      traits.push("High transaction numbers");
     }
 
     if (tokenAccounts.value.length > 5) {
