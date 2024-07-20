@@ -41,7 +41,7 @@ import {
   export const GET = async (req: Request) => {
     const payload: ActionGetResponse = {
       title: "Wallet Analyzer",
-      icon: new URL("/wallet.jpg", new URL(req.url).origin).toString(),
+      icon: new URL("/wallet.JPG", new URL(req.url).origin).toString(),
       description: "Analyze your wallet and get a personalized avatar!",
       label: "Analyze Wallet",
     };
