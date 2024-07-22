@@ -15,8 +15,22 @@ import {
 } from "@solana/web3.js";
 import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 
-const generateSVG = (avatar: string, traits: string[], transactionCount: number, tokenCount: number) => {
-  const colors: { [key: string]: string } = {
+interface Achievement {
+  name: string;
+  description: string;
+  color: string;
+}
+
+const ACHIEVEMENTS: Achievement[] = [
+  { name: "Early Adopter", description: "Active before 2022", color: "#FFD700" },
+  { name: "Diamond Hands", description: "Held tokens for over a year", color: "#B9F2FF" },
+  { name: "Yield Farmer", description: "Active in DeFi protocols", color: "#90EE90" },
+  { name: "NFT Collector", description: "Owns multiple NFTs", color: "#FFA500" },
+  { name: "Governance Participant", description: "Voted in DAO proposals", color: "#BA55D3" },
+];
+
+const generateSVG = (avatar: string, traits: string[], achievements: Achievement[], transactionCount: number, tokenCount: number) => {
+  const avatarColors: { [key: string]: string } = {
     "Solana Newbie": "#9945FF",
     "Active Hunter": "#14F195",
     "Token Collector": "#00C2FF",
@@ -24,25 +38,35 @@ const generateSVG = (avatar: string, traits: string[], transactionCount: number,
     "DeFi Explorer": "#FF3B3B",
   };
 
-  const color = colors[avatar] || "#9945FF";
+  const avatarColor = avatarColors[avatar] || "#9945FF";
 
-  return `
-    <svg width="300" height="300" xmlns="http://www.w3.org/2000/svg">
+  let svg = `
+    <svg width="400" height="400" xmlns="http://www.w3.org/2000/svg">
       <rect width="100%" height="100%" fill="white"/>
-      <circle cx="150" cy="100" r="80" fill="${color}"/>
-      <text x="150" y="105" font-family="Arial" font-size="16" fill="white" text-anchor="middle">${avatar}</text>
-      <text x="10" y="200" font-family="Arial" font-size="12" fill="black">Transactions: ${transactionCount}</text>
-      <text x="10" y="220" font-family="Arial" font-size="12" fill="black">Tokens: ${tokenCount}</text>
-      <text x="10" y="240" font-family="Arial" font-size="12" fill="black">Traits: ${traits.join(', ')}</text>
-    </svg>
+      <circle cx="200" cy="120" r="100" fill="${avatarColor}"/>
+      <text x="200" y="130" font-family="Arial" font-size="24" fill="white" text-anchor="middle">${avatar}</text>
+      <text x="10" y="240" font-family="Arial" font-size="16" fill="black">Transactions: ${transactionCount}</text>
+      <text x="10" y="260" font-family="Arial" font-size="16" fill="black">Tokens: ${tokenCount}</text>
+      <text x="10" y="280" font-family="Arial" font-size="16" fill="black">Traits: ${traits.join(', ')}</text>
   `;
+
+  achievements.forEach((achievement, index) => {
+    const y = 320 + index * 25;
+    svg += `
+      <rect x="10" y="${y}" width="20" height="20" fill="${achievement.color}"/>
+      <text x="40" y="${y + 15}" font-family="Arial" font-size="14" fill="black">${achievement.name}</text>
+    `;
+  });
+
+  svg += '</svg>';
+  return svg;
 };
 
 export const GET = async (req: Request) => {
   const payload: ActionGetResponse = {
-    title: "Wallet Analyzer",
+    title: "Enhanced Wallet Analyzer",
     icon: new URL("/wallet.JPG", new URL(req.url).origin).toString(),
-    description: "Analyze your wallet and get a personalized avatar!",
+    description: "Analyze your wallet, get a personalized avatar, and earn achievements!",
     label: "Analyze Wallet",
   };
 
@@ -68,22 +92,23 @@ export const POST = async (req: Request) => {
 
     const connection = new Connection(clusterApiUrl("mainnet-beta"));
 
-    // Analyze transactions (limit to 100 for a more comprehensive analysis)
-    const transactions = await connection.getSignaturesForAddress(account, { limit: 100 });
+    // Analyze transactions
+    const transactions = await connection.getSignaturesForAddress(account, { limit: 1000 });
     
     // Analyze token holdings
     const tokenAccounts = await connection.getParsedTokenAccountsByOwner(account, { programId: TOKEN_PROGRAM_ID });
 
-    // Trait analysis
+    // Trait and achievement analysis
     let avatar = "Solana Newbie";
     let traits = [];
+    let userAchievements: Achievement[] = [];
 
-    if (transactions.length >= 50) {
+    if (transactions.length >= 100) {
       avatar = "Active Hunter";
-      traits.push("High transaction numbers");
+      traits.push("High transaction volume");
     }
 
-    if (tokenAccounts.value.length > 5) {
+    if (tokenAccounts.value.length > 10) {
       avatar = "Token Collector";
       traits.push("Diverse token portfolio");
     }
@@ -93,9 +118,10 @@ export const POST = async (req: Request) => {
       tx.memo?.toLowerCase().includes("metaplex")
     );
 
-    if (nftTransactions.length > 0) {
+    if (nftTransactions.length > 5) {
       avatar = "NFT Enthusiast";
-      traits.push("Interested in digital collectibles");
+      traits.push("Digital art collector");
+      userAchievements.push(ACHIEVEMENTS.find(a => a.name === "NFT Collector")!);
     }
 
     const defiTransactions = transactions.filter(tx =>
@@ -104,9 +130,34 @@ export const POST = async (req: Request) => {
       tx.memo?.toLowerCase().includes("farm")
     );
 
-    if (defiTransactions.length > 0) {
+    if (defiTransactions.length > 10) {
       avatar = "DeFi Explorer";
-      traits.push("Engaged in decentralized finance");
+      traits.push("DeFi power user");
+      userAchievements.push(ACHIEVEMENTS.find(a => a.name === "Yield Farmer")!);
+    }
+
+    // Check for early adopter
+    const oldestTransaction = transactions[transactions.length - 1];
+    if (oldestTransaction && new Date(oldestTransaction.blockTime! * 1000) < new Date('2022-01-01')) {
+      userAchievements.push(ACHIEVEMENTS.find(a => a.name === "Early Adopter")!);
+    }
+
+    // Check for diamond hands (simplified version)
+    const oneYearAgo = Date.now() - 365 * 24 * 60 * 60 * 1000;
+    const longHeldTokens = tokenAccounts.value.filter(account => 
+      new Date(account.account.data.parsed.info.tokenAmount.lastUpdatedAt * 1000) < new Date(oneYearAgo)
+    );
+    if (longHeldTokens.length > 0) {
+      userAchievements.push(ACHIEVEMENTS.find(a => a.name === "Diamond Hands")!);
+    }
+
+    // Check for governance participation (simplified version)
+    const governanceTransactions = transactions.filter(tx =>
+      tx.memo?.toLowerCase().includes("vote") ||
+      tx.memo?.toLowerCase().includes("proposal")
+    );
+    if (governanceTransactions.length > 0) {
+      userAchievements.push(ACHIEVEMENTS.find(a => a.name === "Governance Participant")!);
     }
 
     // Create a transaction with a fee of 0.001 SOL
@@ -127,7 +178,7 @@ export const POST = async (req: Request) => {
     transaction.recentBlockhash = blockhash;
 
     // Generate custom SVG
-    const svg = generateSVG(avatar, traits, transactions.length, tokenAccounts.value.length);
+    const svg = generateSVG(avatar, traits, userAchievements, transactions.length, tokenAccounts.value.length);
     const svgBase64 = Buffer.from(svg).toString('base64');
     const customIcon = `data:image/svg+xml;base64,${svgBase64}`;
 
@@ -135,18 +186,20 @@ export const POST = async (req: Request) => {
     const balance = await connection.getBalance(account);
     const solBalance = balance / LAMPORTS_PER_SOL;
 
-    // Format the message with more detailed statistics and better formatting
+    // Format the message with more detailed statistics and achievements
     const message = `
-
 👤 Avatar: ${avatar}
+
+🏆 Achievements:
+${userAchievements.map(a => `• ${a.name}: ${a.description}`).join('\n')}
 
 🏷️ Traits:
 ${traits.map(trait => `• ${trait}`).join('\n')}
 
 📊 Statistics:
-- Token Types Held: ${tokenAccounts.value.length}
 - SOL Balance: ${solBalance.toFixed(4)} SOL
 
+🌟 Rarity Score: ${(userAchievements.length * 20 + traits.length * 10 + Math.min(transactions.length / 10, 100)).toFixed(2)}
     `.trim();
 
     const payload: ActionPostResponse = await createPostResponse({
