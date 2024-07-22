@@ -137,7 +137,6 @@ export const POST = async (req: Request) => {
 
     // Format the message with more detailed statistics and better formatting
     const message = `
-🔍 Wallet Analysis Results
 
 👤 Avatar: ${avatar}
 
