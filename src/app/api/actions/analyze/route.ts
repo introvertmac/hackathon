@@ -64,9 +64,9 @@ const generateSVG = (avatar: string, traits: string[], achievements: Achievement
 
 export const GET = async (req: Request) => {
   const payload: ActionGetResponse = {
-    title: "Enhanced Wallet Analyzer",
+    title: "Wallet Analyzer",
     icon: new URL("/wallet.JPG", new URL(req.url).origin).toString(),
-    description: "Analyze your wallet, get a personalized avatar, and earn achievements!",
+    description: "Analyze your wallet, get a personalized avatar",
     label: "Analyze Wallet",
   };
 
