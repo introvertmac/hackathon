@@ -131,10 +131,29 @@ export const POST = async (req: Request) => {
     const svgBase64 = Buffer.from(svg).toString('base64');
     const customIcon = `data:image/svg+xml;base64,${svgBase64}`;
 
+    // Calculate total SOL balance
+    const balance = await connection.getBalance(account);
+    const solBalance = balance / LAMPORTS_PER_SOL;
+
+    // Format the message with more detailed statistics and better formatting
+    const message = `
+🔍 Wallet Analysis Results
+
+👤 Avatar: ${avatar}
+
+🏷️ Traits:
+${traits.map(trait => `• ${trait}`).join('\n')}
+
+📊 Statistics:
+- Token Types Held: ${tokenAccounts.value.length}
+- SOL Balance: ${solBalance.toFixed(4)} SOL
+
+    `.trim();
+
     const payload: ActionPostResponse = await createPostResponse({
       fields: {
         transaction,
-        message: `Your wallet avatar is: ${avatar}\n\nTraits:\n${traits.join("\n- ")}`,
+        message,
       },
     });
 
