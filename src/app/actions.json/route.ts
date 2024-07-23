@@ -7,6 +7,10 @@ export const GET = async () => {
         pathPattern: "/analyze",
         apiPath: "/api/actions/analyze",
       },
+      {
+        pathPattern: "/job",
+        apiPath: "/api/actions/job",
+      },
     ],
   };
 
