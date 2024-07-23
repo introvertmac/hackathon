@@ -23,22 +23,17 @@ import {
     const payload: ActionGetResponse = {
       title: "We are Hiring Devs",
       icon: new URL("/job.JPG", new URL(req.url).origin).toString(),
-      description: "Submit your Superteam and GitHub profiles to create awesome blinks!",
+      description: "Submit your Superteam profile to create awesome blinks!",
       label: "Submit Profile",
       links: {
         actions: [
           {
-            label: "Submit Profiles",
-            href: `${new URL(req.url).origin}/api/actions/job?superteamProfile={superteamProfile}&githubProfile={githubProfile}`,
+            label: "Submit Profile",
+            href: `${new URL(req.url).origin}/api/actions/job?superteamProfile={superteamProfile}`,
             parameters: [
               {
                 name: "superteamProfile",
                 label: "Superteam Earn Profile Link",
-                required: true,
-              },
-              {
-                name: "githubProfile",
-                label: "GitHub Profile Link",
                 required: true,
               },
             ],
@@ -61,9 +56,8 @@ import {
   
       const url = new URL(req.url);
       const superteamProfile = url.searchParams.get('superteamProfile');
-      const githubProfile = url.searchParams.get('githubProfile');
   
-      if (!superteamProfile || !githubProfile || !account) {
+      if (!superteamProfile || !account) {
         throw new Error("Missing required fields");
       }
   
@@ -80,23 +74,20 @@ import {
         throw new Error("Invalid Superteam Earn profile link");
       }
   
-      // Validate GitHub profile link
-      if (!validateGithubProfile(githubProfile)) {
-        throw new Error("Invalid GitHub profile link");
-      }
-  
-      // Extract usernames
+      // Extract username
       const superteamUsername = extractSuperteamUsername(superteamProfile);
-      const githubUsername = extractGithubUsername(githubProfile);
   
       // Check if the profile already exists
       const existingProfile = await checkExistingProfile(walletAddress.toString());
       if (existingProfile) {
-        throw new Error("Profile already exists for this wallet address");
+        return new Response(JSON.stringify({ error: "Profile already exists for this wallet address" }), {
+          status: 400,
+          headers: { ...ACTIONS_CORS_HEADERS, 'Content-Type': 'application/json' },
+        });
       }
   
       // Save to Airtable
-      await saveToAirtable(superteamUsername, githubUsername, walletAddress.toString());
+      await saveToAirtable(superteamUsername, walletAddress.toString());
   
       // Create a transaction with a dummy instruction
       const transaction = new Transaction().add(
@@ -152,17 +143,8 @@ import {
     return /^https:\/\/earn\.superteam\.fun\/t\/[a-zA-Z0-9_-]+\/?$/.test(url);
   }
   
-  function validateGithubProfile(url: string): boolean {
-    return /^https:\/\/github\.com\/[a-zA-Z0-9_-]+\/?$/.test(url);
-  }
-  
   function extractSuperteamUsername(url: string): string {
     const match = url.match(/\/t\/([a-zA-Z0-9_-]+)/);
-    return match ? match[1] : '';
-  }
-  
-  function extractGithubUsername(url: string): string {
-    const match = url.match(/github\.com\/([a-zA-Z0-9_-]+)/);
     return match ? match[1] : '';
   }
   
@@ -180,13 +162,12 @@ import {
     });
   }
   
-  async function saveToAirtable(superteamUsername: string, githubUsername: string, walletAddress: string) {
+  async function saveToAirtable(superteamUsername: string, walletAddress: string) {
     return new Promise((resolve, reject) => {
       base('Job Board').create([
         {
           fields: {
             'Superteam Username': superteamUsername,
-            'GitHub Username': githubUsername,
             'Wallet Address': walletAddress,
             'Submission Date': new Date().toISOString(),
           },
