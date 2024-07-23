@@ -33,7 +33,7 @@ import {
             parameters: [
               {
                 name: "profileLink",
-                label: "link of Superteam Earn/ GitHub",
+                label: "Link of your Superteam Earn or GitHub Profile",
                 required: true,
               },
             ],
