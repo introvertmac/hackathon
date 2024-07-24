@@ -14,7 +14,6 @@ import {
 } from "@solana/web3.js";
 import Airtable from 'airtable';
 import { randomBytes, createHash } from 'crypto';
-import { rateLimit } from 'express-rate-limit';
 
 // Configure Airtable
 const base = new Airtable({ apiKey: process.env.AIRTABLE_COUPON_API_KEY }).base(process.env.AIRTABLE_COUPON_BASE_ID!);
@@ -22,16 +21,6 @@ const base = new Airtable({ apiKey: process.env.AIRTABLE_COUPON_API_KEY }).base(
 const PAYMENT_AMOUNT = 0.0058 * 1e9; // 0.0058 SOL in lamports
 const RECIPIENT_ADDRESS = new PublicKey("2KsTX7z6AFR5cMjNuiWmrBSPHPk3F3tb7K5Fw14iek3t");
 const MAX_ATTEMPTS = 10;
-const COUPON_EXPIRATION_HOURS = 24;
-
-// Configure rate limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 10, // Limit each IP to 10 requests per windowMs
-  message: "Too many requests from this IP, please try again later.",
-  standardHeaders: true,
-  legacyHeaders: false,
-});
 
 export const GET = async (req: Request): Promise<Response> => {
   const payload: ActionGetResponse = {
@@ -57,9 +46,6 @@ export const OPTIONS = async (): Promise<Response> => {
 
 export const POST = async (req: Request): Promise<Response> => {
   try {
-    // Apply rate limiting
-    await new Promise((resolve) => limiter(req as any, {} as any, resolve));
-
     const body: ActionPostRequest = await req.json();
 
     let account: PublicKey;
@@ -87,8 +73,8 @@ export const POST = async (req: Request): Promise<Response> => {
     // Generate the coupon code
     const couponCode = await generateUniqueCouponCode();
 
-    // Save the coupon to Airtable with 'Pending' status
-    await saveCouponToAirtable(couponCode, 'Pending', account.toString());
+    // Save the coupon to Airtable without status
+    await saveCouponToAirtable(couponCode, account.toString());
 
     const payload: ActionPostResponse = await createPostResponse({
       fields: {
@@ -137,17 +123,12 @@ async function isCodeUnique(code: string): Promise<boolean> {
   });
 }
 
-async function saveCouponToAirtable(code: string, status: string, userAccount: string): Promise<void> {
-  const expirationTime = new Date();
-  expirationTime.setHours(expirationTime.getHours() + COUPON_EXPIRATION_HOURS);
-
+async function saveCouponToAirtable(code: string, userAccount: string): Promise<void> {
   return new Promise((resolve, reject) => {
     base('Coupons').create({
       "Code": code,
       "CreatedAt": new Date().toISOString(),
-      "Status": status,
       "UserAccount": userAccount,
-      "ExpiresAt": expirationTime.toISOString()
     }, (err: Error | null) => {
       if (err) {
         console.error("Error saving coupon to Airtable:", err);
