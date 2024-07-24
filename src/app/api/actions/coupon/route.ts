@@ -29,7 +29,7 @@ export const GET = async (req: Request) => {
     const payload: ActionGetResponse = {
         title: "Generate Coupon",
         icon: new URL("/coupon.png", new URL(req.url).origin).toString(),
-        description: "Pay 0.0058 SOL to generate a unique coupon code and redeem it for the report on our Telegram",
+        description: "Pay 0.0058 SOL to generate a unique coupon code and redeem it for the report on our @Dappshuntbot Telegram channel",
         label: "Generate Coupon",
     };
 
