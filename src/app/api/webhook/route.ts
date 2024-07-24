@@ -13,36 +13,34 @@ const base = new Airtable({ apiKey: process.env.AIRTABLE_COUPON_API_KEY }).base(
 // Helper function to normalize coupon code
 const normalizeCoupon = (code: string): string => code.trim().toUpperCase();
 
-// Helper function to check if a coupon is valid
-const isValidCoupon = async (code: string): Promise<boolean> => {
+// Helper function to check if a coupon is valid and active
+const isValidCoupon = async (code: string): Promise<{ isValid: boolean; recordId?: string }> => {
   const records = await base('Coupons').select({
     filterByFormula: `AND({Code} = '${code}', {Status} = 'Active')`
   }).firstPage();
-  return records.length > 0;
+  
+  if (records && records.length > 0) {
+    return { isValid: true, recordId: records[0].id };
+  }
+  return { isValid: false };
 };
 
 // Helper function to mark a coupon as used
-const markCouponAsUsed = async (code: string): Promise<void> => {
-  const records = await base('Coupons').select({
-    filterByFormula: `{Code} = '${code}'`
-  }).firstPage();
-
-  if (records.length > 0) {
-    await base('Coupons').update([
-      {
-        id: records[0].id,
-        fields: {
-          UsedAt: new Date().toISOString(),
-          Status: 'Used'
-        }
+const markCouponAsUsed = async (recordId: string): Promise<void> => {
+  await base('Coupons').update([
+    {
+      id: recordId,
+      fields: {
+        UsedAt: new Date().toISOString(),
+        Status: 'Used'
       }
-    ]);
-  }
+    }
+  ]);
 };
 
 // Welcome message
 bot.command('start', (ctx) => {
-  ctx.reply('Welcome to Dappshunt! 🚀\n\nWe\'re excited to have you here. Please enter your 12-character coupon code to access your exclusive report.');
+  ctx.reply('Welcome to Dappshunt! 🚀\n\nWe\'re excited to have you here. Please enter your 12-character coupon code to access your report.');
 });
 
 // Bot message handler
@@ -58,17 +56,20 @@ bot.on('text', async (ctx) => {
     }
 
     try {
-      if (await isValidCoupon(normalizedCoupon)) {
-        await markCouponAsUsed(normalizedCoupon);
-        
+      const { isValid, recordId } = await isValidCoupon(normalizedCoupon);
+      
+      if (isValid && recordId) {
         // Send success message
         await ctx.reply('🎉 Fantastic! Your coupon is valid.\n\nThank you for your purchase! Your exclusive Dappshunt report is being prepared for download.');
         
         // Send the report file
-        const filePath = path.join(process.cwd(), 'public', 'report.pdf');
+        const filePath = path.join(process.cwd(), 'public', 'dappshunt_report.pdf');
         await ctx.replyWithDocument({ source: fs.createReadStream(filePath), filename: 'dappshunt_report.pdf' });
         
         await ctx.reply('Enjoy your insights into the world of dapps!');
+
+        // Mark coupon as used only after successfully sending the report
+        await markCouponAsUsed(recordId);
       } else {
         await ctx.reply('Sorry, this coupon appears to be invalid or has already been used. If you believe this is an error, please contact our support team.');
       }
