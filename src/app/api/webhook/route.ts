@@ -19,9 +19,8 @@ const mainKeyboard = Markup.keyboard([
 
 // User state management
 type UserState = {
-  step: 'IDLE' | 'COUPON' | 'WALLET' | 'SIGNATURE';
+  step: 'IDLE' | 'COUPON' | 'SIGNATURE';
   couponCode?: string;
-  walletAddress?: string;
 };
 
 const userStates = new Map<number, UserState>();
@@ -63,8 +62,6 @@ bot.on('text', async (ctx) => {
 
   if (userState.step === 'COUPON') {
     await handleCouponInput(ctx, userId, userState);
-  } else if (userState.step === 'WALLET') {
-    await handleWalletInput(ctx, userId, userState);
   } else if (userState.step === 'SIGNATURE') {
     await handleSignatureInput(ctx, userId, userState);
   } else {
@@ -85,34 +82,17 @@ async function handleCouponInput(ctx: Context, userId: number, userState: UserSt
     return sendErrorMessage(ctx, 'Sorry, this coupon code is not valid or has already been used. Please check your code and try again.');
   }
 
-  userStates.set(userId, { step: 'WALLET', couponCode });
-  ctx.reply('Great! Now, please send me the Solana wallet address you used for payment.');
-}
-
-async function handleWalletInput(ctx: Context, userId: number, userState: UserState) {
-  const message = ctx.message as Message.TextMessage;
-  const walletAddress = message.text.trim();
-
-  if (!isValidSolanaAddress(walletAddress)) {
-    return sendErrorMessage(ctx, 'That doesn\'t look like a valid Solana wallet address. Please double-check and try again.');
-  }
-
-  const couponCode = userState.couponCode;
-  if (!couponCode) {
-    return sendErrorMessage(ctx, 'Sorry, there was an error processing your request. Please start over.');
-  }
-
-  userStates.set(userId, { step: 'SIGNATURE', couponCode, walletAddress });
-  ctx.reply('Please enter the transaction signature. You can find it in your wallet transaction history or on the Solscan transaction page.');
+  userStates.set(userId, { step: 'SIGNATURE', couponCode });
+  ctx.reply('Great! Now, please send me the transaction signature. You can find it in your wallet transaction history or on the Solscan transaction page.');
 }
 
 async function handleSignatureInput(ctx: Context, userId: number, userState: UserState) {
   const message = ctx.message as Message.TextMessage;
   const signature = message.text.trim();
 
-  const { couponCode, walletAddress } = userState;
+  const { couponCode } = userState;
 
-  if (!couponCode || !walletAddress) {
+  if (!couponCode) {
     return sendErrorMessage(ctx, 'Sorry, there was an error processing your request. Please start over.');
   }
 
@@ -122,12 +102,7 @@ async function handleSignatureInput(ctx: Context, userId: number, userState: Use
 
   ctx.reply('Verifying your transaction signature, please wait...');
 
-  const isSignatureValid = await checkSignature(walletAddress, signature);
-  if (!isSignatureValid) {
-    return sendErrorMessage(ctx, 'Sorry, this transaction signature is not valid for the provided wallet address. Please check your details and try again.');
-  }
-
-  const verificationResult = await verifyCoupon(couponCode, walletAddress);
+  const verificationResult = await verifyCouponAndSignature(couponCode, signature);
 
   if (verificationResult.isValid && verificationResult.recordId) {
     await activateCoupon(verificationResult.recordId, signature);
@@ -144,19 +119,10 @@ async function handleSignatureInput(ctx: Context, userId: number, userState: Use
       mainKeyboard
     );
   } else {
-    sendErrorMessage(ctx, 'Sorry, we couldn\'t verify your coupon with this wallet address. Please make sure you\'re using the exact wallet address used for payment. If you continue to have issues, please contact our support team.');
+    sendErrorMessage(ctx, 'Sorry, we couldn\'t verify your coupon with the provided signature. Please make sure you\'re using the correct transaction signature. If you continue to have issues, please contact our support team.');
   }
 
   userStates.set(userId, { step: 'IDLE' });
-}
-
-function isValidSolanaAddress(address: string): boolean {
-  try {
-    new PublicKey(address);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 function isValidSignatureFormat(signature: string): boolean {
@@ -178,18 +144,25 @@ async function checkCouponValidity(code: string): Promise<boolean> {
   });
 }
 
-async function verifyCoupon(code: string, walletAddress: string): Promise<{ isValid: boolean; recordId?: string }> {
+async function verifyCouponAndSignature(code: string, signature: string): Promise<{ isValid: boolean; recordId?: string }> {
   return new Promise((resolve) => {
     base('Coupons').select({
-      filterByFormula: `AND({Code} = '${code}', {UserAccount} = '${walletAddress}', {Status} != 'Used')`
-    }).firstPage((err, records) => {
+      filterByFormula: `{Code} = '${code}'`
+    }).firstPage(async (err, records) => {
       if (err) {
         console.error('Error verifying coupon:', err);
         resolve({ isValid: false });
         return;
       }
-      if (records && records.length > 0 && records[0].id) {
-        resolve({ isValid: true, recordId: records[0].id });
+      if (records && records.length > 0) {
+        const record = records[0];
+        const walletAddress = record.get('UserAccount') as string;
+
+        if (await checkSignature(walletAddress, signature)) {
+          resolve({ isValid: true, recordId: record.id });
+        } else {
+          resolve({ isValid: false });
+        }
       } else {
         resolve({ isValid: false });
       }
