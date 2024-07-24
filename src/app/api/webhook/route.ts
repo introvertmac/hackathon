@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { Telegraf } from 'telegraf';
+import { Telegraf, Context } from 'telegraf';
 import { Update } from 'telegraf/types';
 import Airtable from 'airtable';
 import { Connection, PublicKey, clusterApiUrl } from '@solana/web3.js';
@@ -12,37 +12,60 @@ const base = new Airtable({ apiKey: process.env.AIRTABLE_COUPON_API_KEY }).base(
 const PAYMENT_AMOUNT = 0.0058 * 1e9; // 0.0058 SOL in lamports
 const RECIPIENT_ADDRESS = new PublicKey("2KsTX7z6AFR5cMjNuiWmrBSPHPk3F3tb7K5Fw14iek3t");
 
+// Simple in-memory state management (consider using a database for production)
+const userStates = new Map<number, { step: 'COUPON' | 'WALLET'; couponCode?: string }>();
+
 bot.command('start', (ctx) => {
-  ctx.reply('Welcome to Dappshunt! 🚀\n\nTo verify your coupon, please send your coupon code and wallet address in the following format:\n\nVERIFY couponcode walletaddress');
+  const userId = ctx.from.id;
+  userStates.set(userId, { step: 'COUPON' });
+  ctx.reply(
+    'Welcome to Dappshunt! 🚀\n\n' +
+    'To verify your coupon and receive your report, please follow these steps:\n\n' +
+    '1. Send your coupon code\n' +
+    '2. Send the wallet address used for payment\n\n' +
+    'Let\'s begin! Please send your coupon code.'
+  );
 });
 
-bot.hears(/^VERIFY\s+(\w+)\s+(\S+)$/i, async (ctx) => {
-  const couponCode = ctx.match[1].toUpperCase();
-  const walletAddress = ctx.match[2];
+bot.on('text', async (ctx) => {
+  const userId = ctx.from.id;
+  const userState = userStates.get(userId) || { step: 'COUPON' };
 
-  try {
-    const { isValid, record } = await isValidPendingCoupon(couponCode, walletAddress);
-    
-    if (isValid && record) {
-      const isPaymentConfirmed = await verifyPayment(walletAddress);
+  if (userState.step === 'COUPON') {
+    const couponCode = ctx.message.text.trim().toUpperCase();
+    userStates.set(userId, { step: 'WALLET', couponCode });
+    ctx.reply('Great! Now, please send the wallet address you used for payment.');
+  } else if (userState.step === 'WALLET') {
+    const walletAddress = ctx.message.text.trim(); // Keep original case
+    const couponCode = userState.couponCode!;
+
+    try {
+      const { isValid, record } = await isValidPendingCoupon(couponCode, walletAddress);
       
-      if (isPaymentConfirmed) {
-        await activateCoupon(record.id);
-        await ctx.reply('🎉 Fantastic! Your coupon is now activated.\n\nThank you for your purchase! Your exclusive Dappshunt report is being prepared for download.');
+      if (isValid && record) {
+        const isPaymentConfirmed = await verifyPayment(walletAddress);
         
-        const filePath = path.join(process.cwd(), 'public', 'dappshunt_report.pdf');
-        await ctx.replyWithDocument({ source: fs.createReadStream(filePath), filename: 'dappshunt_report.pdf' });
-        
-        await ctx.reply('Enjoy your insights into the world of Indie hacking!');
+        if (isPaymentConfirmed) {
+          await activateCoupon(record.id);
+          await ctx.reply('🎉 Fantastic! Your coupon is now activated.\n\nThank you for your purchase! Your exclusive Dappshunt report is being prepared for download.');
+          
+          const filePath = path.join(process.cwd(), 'public', 'dappshunt_report.pdf');
+          await ctx.replyWithDocument({ source: fs.createReadStream(filePath), filename: 'dappshunt_report.pdf' });
+          
+          await ctx.reply('Enjoy your insights into the world of Indie hacking!');
+        } else {
+          await ctx.reply('We couldn\'t verify your payment. Please ensure you\'ve completed the transaction and try again by sending /start.');
+        }
       } else {
-        await ctx.reply('We couldn\'t verify your payment. Please ensure you\'ve completed the transaction and try again in a few minutes.');
+        await ctx.reply('Sorry, this coupon appears to be invalid or has already been used. If you believe this is an error, please contact our support team or try again by sending /start.');
       }
-    } else {
-      await ctx.reply('Sorry, this coupon appears to be invalid or has already been used. If you believe this is an error, please contact our support team.');
+    } catch (error) {
+      console.error('Error processing coupon:', error);
+      await ctx.reply('Oops! We encountered an issue while processing your coupon. Please try again later or contact our support team if the problem persists.');
     }
-  } catch (error) {
-    console.error('Error processing coupon:', error);
-    await ctx.reply('Oops! We encountered an issue while processing your coupon. Please try again later or contact our support team if the problem persists.');
+
+    // Reset user state after processing
+    userStates.delete(userId);
   }
 });
 
