@@ -160,7 +160,7 @@ function isValidSolanaAddress(address: string): boolean {
 }
 
 function isValidSignatureFormat(signature: string): boolean {
-  return /^[A-Za-z0-9]{87}$/.test(signature);
+  return /^[A-Za-z0-9]{88}$/.test(signature);
 }
 
 async function checkCouponValidity(code: string): Promise<boolean> {
