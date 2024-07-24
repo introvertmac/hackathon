@@ -77,17 +77,12 @@ async function handleCouponInput(ctx: Context, userId: number, userState: UserSt
   const couponCode = message.text.trim().toUpperCase();
 
   if (couponCode.length !== 12 || !/^[A-Z0-9]+$/.test(couponCode)) {
-    ctx.reply('Oops! That doesn\'t look like a valid coupon code. Please enter a 12-character alphanumeric code.');
-    return;
+    return sendErrorMessage(ctx, 'Oops! That doesn\'t look like a valid coupon code. Please enter a 12-character alphanumeric code.');
   }
 
-  ctx.reply('Checking your coupon code, please wait...');
-
-  const isValidCoupon = await checkCouponValidity(couponCode);
-  if (!isValidCoupon) {
-    ctx.reply('Sorry, this coupon code is not valid or has already been used. Please check your code and try again.');
-    userStates.set(userId, { step: 'IDLE' });
-    return;
+  const isCouponValid = await checkCouponValidity(couponCode);
+  if (!isCouponValid) {
+    return sendErrorMessage(ctx, 'Sorry, this coupon code is not valid or has already been used. Please check your code and try again.');
   }
 
   userStates.set(userId, { step: 'WALLET', couponCode });
@@ -99,15 +94,12 @@ async function handleWalletInput(ctx: Context, userId: number, userState: UserSt
   const walletAddress = message.text.trim();
 
   if (!isValidSolanaAddress(walletAddress)) {
-    ctx.reply('That doesn\'t look like a valid Solana wallet address. Please double-check and try again.');
-    return;
+    return sendErrorMessage(ctx, 'That doesn\'t look like a valid Solana wallet address. Please double-check and try again.');
   }
 
   const couponCode = userState.couponCode;
   if (!couponCode) {
-    ctx.reply('Sorry, there was an error processing your request. Please start over.', mainKeyboard);
-    userStates.set(userId, { step: 'IDLE' });
-    return;
+    return sendErrorMessage(ctx, 'Sorry, there was an error processing your request. Please start over.');
   }
 
   userStates.set(userId, { step: 'SIGNATURE', couponCode, walletAddress });
@@ -121,18 +113,18 @@ async function handleSignatureInput(ctx: Context, userId: number, userState: Use
   const { couponCode, walletAddress } = userState;
 
   if (!couponCode || !walletAddress) {
-    ctx.reply('Sorry, there was an error processing your request. Please start over.', mainKeyboard);
-    userStates.set(userId, { step: 'IDLE' });
-    return;
+    return sendErrorMessage(ctx, 'Sorry, there was an error processing your request. Please start over.');
+  }
+
+  if (!isValidSignatureFormat(signature)) {
+    return sendErrorMessage(ctx, 'That doesn\'t look like a valid Solana transaction signature. Please double-check and try again.');
   }
 
   ctx.reply('Verifying your transaction signature, please wait...');
 
   const isSignatureValid = await checkSignature(walletAddress, signature);
   if (!isSignatureValid) {
-    ctx.reply('Sorry, this transaction signature is not valid for the provided wallet address. Please check your details and try again.');
-    userStates.set(userId, { step: 'IDLE' });
-    return;
+    return sendErrorMessage(ctx, 'Sorry, this transaction signature is not valid for the provided wallet address. Please check your details and try again.');
   }
 
   const verificationResult = await verifyCoupon(couponCode, walletAddress);
@@ -152,12 +144,7 @@ async function handleSignatureInput(ctx: Context, userId: number, userState: Use
       mainKeyboard
     );
   } else {
-    ctx.reply(
-      'Sorry, we couldn\'t verify your coupon with this wallet address. ' +
-      'Please make sure you\'re using the exact wallet address used for payment.\n\n' +
-      'If you continue to have issues, please contact our support team.',
-      mainKeyboard
-    );
+    sendErrorMessage(ctx, 'Sorry, we couldn\'t verify your coupon with this wallet address. Please make sure you\'re using the exact wallet address used for payment. If you continue to have issues, please contact our support team.');
   }
 
   userStates.set(userId, { step: 'IDLE' });
@@ -170,6 +157,10 @@ function isValidSolanaAddress(address: string): boolean {
   } catch {
     return false;
   }
+}
+
+function isValidSignatureFormat(signature: string): boolean {
+  return /^[A-Za-z0-9]{87}$/.test(signature);
 }
 
 async function checkCouponValidity(code: string): Promise<boolean> {
@@ -239,6 +230,14 @@ async function activateCoupon(recordId: string, signature: string): Promise<void
       resolve();
     });
   });
+}
+
+function sendErrorMessage(ctx: Context, message: string) {
+  ctx.reply(message, mainKeyboard);
+  const userId = ctx.from?.id;
+  if (userId) {
+    userStates.set(userId, { step: 'IDLE' });
+  }
 }
 
 // Handle unknown messages
