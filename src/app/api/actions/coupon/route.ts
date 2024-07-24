@@ -16,6 +16,10 @@ import Airtable from 'airtable';
 import { randomBytes, createHash } from 'crypto';
 
 // Configure Airtable
+if (!process.env.AIRTABLE_COUPON_API_KEY || !process.env.AIRTABLE_COUPON_BASE_ID) {
+  throw new Error('Airtable configuration is missing');
+}
+
 const base = new Airtable({ apiKey: process.env.AIRTABLE_COUPON_API_KEY }).base(process.env.AIRTABLE_COUPON_BASE_ID!);
 
 const PAYMENT_AMOUNT = 0.0058 * 1e9; // 0.0058 SOL in lamports
