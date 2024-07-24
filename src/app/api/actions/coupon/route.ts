@@ -41,6 +41,17 @@ export const GET = async (req: Request) => {
 export const OPTIONS = GET;
 
 export const POST = async (req: Request) => {
+    const { searchParams } = new URL(req.url);
+    const isWebhook = searchParams.get('webhook') === 'true';
+
+    if (isWebhook) {
+        return handleWebhook(req);
+    } else {
+        return handleRegularPost(req);
+    }
+};
+
+async function handleRegularPost(req: Request) {
     try {
         const body: ActionPostRequest = await req.json();
 
@@ -85,7 +96,36 @@ export const POST = async (req: Request) => {
             headers: { ...ACTIONS_CORS_HEADERS, 'Content-Type': 'application/json' },
         });
     }
-};
+}
+
+async function handleWebhook(req: Request) {
+    try {
+        const { signature } = await req.json();
+        if (!signature) {
+            throw new Error("Missing transaction signature");
+        }
+
+        const connection = new Connection(process.env.SOLANA_RPC! || clusterApiUrl("mainnet-beta"));
+
+        await verifyTransaction(signature, connection);
+
+        const code = await generateUniqueCouponCode();
+
+        await saveCouponToAirtable(code);
+
+        return new Response(JSON.stringify({ code }), {
+            status: 200,
+            headers: { ...ACTIONS_CORS_HEADERS, 'Content-Type': 'application/json' },
+        });
+    } catch (err) {
+        console.error(err);
+        const errorMessage = err instanceof Error ? err.message : "An unknown error occurred";
+        return new Response(JSON.stringify({ error: errorMessage }), {
+            status: 500,
+            headers: { ...ACTIONS_CORS_HEADERS, 'Content-Type': 'application/json' },
+        });
+    }
+}
 
 function generateUniqueCode(): string {
     const bytes = randomBytes(8);
@@ -187,32 +227,3 @@ async function generateUniqueCouponCode(): Promise<string> {
     } while (!(await isCodeUnique(code)));
     return code;
 }
-
-export const POST_WEBHOOK = async (req: Request) => {
-    try {
-        const { signature } = await req.json();
-        if (!signature) {
-            throw new Error("Missing transaction signature");
-        }
-
-        const connection = new Connection(process.env.SOLANA_RPC! || clusterApiUrl("mainnet-beta"));
-
-        await verifyTransaction(signature, connection);
-
-        const code = await generateUniqueCouponCode();
-
-        await saveCouponToAirtable(code);
-
-        return new Response(JSON.stringify({ code }), {
-            status: 200,
-            headers: { ...ACTIONS_CORS_HEADERS, 'Content-Type': 'application/json' },
-        });
-    } catch (err) {
-        console.error(err);
-        const errorMessage = err instanceof Error ? err.message : "An unknown error occurred";
-        return new Response(JSON.stringify({ error: errorMessage }), {
-            status: 500,
-            headers: { ...ACTIONS_CORS_HEADERS, 'Content-Type': 'application/json' },
-        });
-    }
-};
