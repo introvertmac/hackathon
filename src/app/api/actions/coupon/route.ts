@@ -1,18 +1,20 @@
 import {
+  ActionGetResponse,
   ActionPostResponse,
   ACTIONS_CORS_HEADERS,
-  createPostResponse,
-  ActionGetResponse,
   ActionPostRequest,
+  createPostResponse,
 } from "@solana/actions";
 import {
-  clusterApiUrl,
   Connection,
   PublicKey,
   Transaction,
   SystemProgram,
+  clusterApiUrl,
+  ParsedInstruction,
+  PartiallyDecodedInstruction,
 } from "@solana/web3.js";
-import Airtable from 'airtable';
+import Airtable, { FieldSet, Records } from 'airtable';
 import { randomBytes, createHash } from 'crypto';
 
 // Configure Airtable
@@ -22,11 +24,11 @@ const PAYMENT_AMOUNT = 0.0058 * 1e9; // 0.0058 SOL in lamports
 const RECIPIENT_ADDRESS = new PublicKey("2KsTX7z6AFR5cMjNuiWmrBSPHPk3F3tb7K5Fw14iek3t");
 const MAX_ATTEMPTS = 10;
 
-export const GET = async (req: Request) => {
+export const GET = async (req: Request): Promise<Response> => {
   const payload: ActionGetResponse = {
     title: "Generate Coupon",
     icon: new URL("/coupon.png", new URL(req.url).origin).toString(),
-    description: "Pay 0.0058 SOL to generate a unique coupon code and redeem it for the report on our @Dappshuntbot Telegram channel",
+    description: "Pay 0.0058 SOL to generate a unique coupon code for our @Dappshuntbot Telegram channel report",
     label: "Generate Coupon",
   };
 
@@ -38,13 +40,13 @@ export const GET = async (req: Request) => {
   });
 };
 
-export const OPTIONS = async () => {
+export const OPTIONS = async (): Promise<Response> => {
   return new Response(null, {
     headers: ACTIONS_CORS_HEADERS,
   });
 };
 
-export const POST = async (req: Request) => {
+export const POST = async (req: Request): Promise<Response> => {
   try {
     const body: ActionPostRequest = await req.json();
 
@@ -57,6 +59,12 @@ export const POST = async (req: Request) => {
 
     const connection = new Connection(process.env.SOLANA_RPC! || clusterApiUrl("mainnet-beta"));
 
+    // Generate the coupon code in parallel with fetching the blockhash
+    const [code, { blockhash }] = await Promise.all([
+      generateUniqueCouponCode(),
+      connection.getLatestBlockhash()
+    ]);
+
     const transaction = new Transaction().add(
       SystemProgram.transfer({
         fromPubkey: account,
@@ -66,19 +74,17 @@ export const POST = async (req: Request) => {
     );
 
     transaction.feePayer = account;
-    transaction.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
-
-    const code = await generateUniqueCouponCode();
+    transaction.recentBlockhash = blockhash;
 
     const payload: ActionPostResponse = await createPostResponse({
       fields: {
         transaction,
-        message: `Your coupon code is: ${code}`,
+        message: `Your coupon code is: ${code}. It is now active and ready to use.`,
       },
     });
 
-    // Save the coupon to Airtable after the transaction is created
-    await saveCouponToAirtable(code);
+    // Save the coupon to Airtable with 'Active' status
+    await saveCouponToAirtable(code, 'Active');
 
     return new Response(JSON.stringify(payload), {
       headers: {
@@ -119,14 +125,15 @@ async function isCodeUnique(code: string): Promise<boolean> {
   });
 }
 
-async function saveCouponToAirtable(code: string): Promise<void> {
+async function saveCouponToAirtable(code: string, status: string): Promise<void> {
   return new Promise((resolve, reject) => {
     base('Coupons').create({
       "Code": code,
       "CreatedAt": new Date().toISOString(),
-      "Status": "Active"
-    }, (err) => {
+      "Status": status,
+    }, (err: Error | null) => {
       if (err) {
+        console.error("Error saving coupon to Airtable:", err);
         reject(err);
         return;
       }
@@ -147,3 +154,67 @@ async function generateUniqueCouponCode(): Promise<string> {
   } while (!(await isCodeUnique(code)));
   return code;
 }
+
+function isPartiallyDecodedInstruction(instruction: ParsedInstruction | PartiallyDecodedInstruction): instruction is PartiallyDecodedInstruction {
+  return 'programId' in instruction && 'accounts' in instruction;
+}
+
+export const handleWebhook = async (req: Request): Promise<Response> => {
+  try {
+    const { signature } = await req.json();
+    if (!signature) {
+      throw new Error("Missing transaction signature");
+    }
+
+    const connection = new Connection(process.env.SOLANA_RPC! || clusterApiUrl("mainnet-beta"));
+
+    // Verify the transaction
+    const transaction = await connection.getParsedTransaction(signature, {
+      commitment: 'confirmed',
+    });
+
+    if (!transaction) {
+      throw new Error("Transaction not found");
+    }
+
+    // Verify transaction details
+    const instruction = transaction.transaction.message.instructions[0];
+    if (isPartiallyDecodedInstruction(instruction)) {
+      if (instruction.programId.toString() !== SystemProgram.programId.toString()) {
+        throw new Error("Invalid transaction: wrong program ID");
+      }
+
+      if (instruction.accounts[1].toString() !== RECIPIENT_ADDRESS.toString()) {
+        throw new Error("Invalid transaction: wrong recipient");
+      }
+    } else {
+      throw new Error("Invalid transaction: unexpected instruction format");
+    }
+
+    if (
+      transaction.meta?.postBalances[1] === undefined ||
+      transaction.meta?.preBalances[1] === undefined ||
+      transaction.meta.postBalances[1] - transaction.meta.preBalances[1] !== PAYMENT_AMOUNT
+    ) {
+      throw new Error("Invalid transaction: incorrect amount");
+    }
+
+    return new Response(JSON.stringify({ success: true, message: "Coupon verified successfully" }), {
+      status: 200,
+      headers: {
+        ...ACTIONS_CORS_HEADERS,
+        'Content-Type': 'application/json'
+      },
+    });
+  } catch (err) {
+    console.error(err);
+    const errorMessage = err instanceof Error ? err.message : "An unknown error occurred";
+    return new Response(JSON.stringify({ error: errorMessage }), {
+      status: 400,
+      headers: {
+        ...ACTIONS_CORS_HEADERS,
+        'Content-Type': 'application/json'
+      },
+    });
+  }
+};
