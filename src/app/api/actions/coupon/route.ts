@@ -11,11 +11,10 @@ import {
   Transaction,
   SystemProgram,
   clusterApiUrl,
-  ParsedInstruction,
-  PartiallyDecodedInstruction,
 } from "@solana/web3.js";
-import Airtable, { FieldSet, Records } from 'airtable';
+import Airtable from 'airtable';
 import { randomBytes, createHash } from 'crypto';
+import { rateLimit } from 'express-rate-limit';
 
 // Configure Airtable
 const base = new Airtable({ apiKey: process.env.AIRTABLE_COUPON_API_KEY }).base(process.env.AIRTABLE_COUPON_BASE_ID!);
@@ -23,6 +22,16 @@ const base = new Airtable({ apiKey: process.env.AIRTABLE_COUPON_API_KEY }).base(
 const PAYMENT_AMOUNT = 0.0058 * 1e9; // 0.0058 SOL in lamports
 const RECIPIENT_ADDRESS = new PublicKey("2KsTX7z6AFR5cMjNuiWmrBSPHPk3F3tb7K5Fw14iek3t");
 const MAX_ATTEMPTS = 10;
+const COUPON_EXPIRATION_HOURS = 24;
+
+// Configure rate limiting
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10, // Limit each IP to 10 requests per windowMs
+  message: "Too many requests from this IP, please try again later.",
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 export const GET = async (req: Request): Promise<Response> => {
   const payload: ActionGetResponse = {
@@ -48,6 +57,9 @@ export const OPTIONS = async (): Promise<Response> => {
 
 export const POST = async (req: Request): Promise<Response> => {
   try {
+    // Apply rate limiting
+    await new Promise((resolve) => limiter(req as any, {} as any, resolve));
+
     const body: ActionPostRequest = await req.json();
 
     let account: PublicKey;
@@ -59,11 +71,7 @@ export const POST = async (req: Request): Promise<Response> => {
 
     const connection = new Connection(process.env.SOLANA_RPC! || clusterApiUrl("mainnet-beta"));
 
-    // Generate the coupon code in parallel with fetching the blockhash
-    const [code, { blockhash }] = await Promise.all([
-      generateUniqueCouponCode(),
-      connection.getLatestBlockhash()
-    ]);
+    const { blockhash } = await connection.getLatestBlockhash();
 
     const transaction = new Transaction().add(
       SystemProgram.transfer({
@@ -76,24 +84,27 @@ export const POST = async (req: Request): Promise<Response> => {
     transaction.feePayer = account;
     transaction.recentBlockhash = blockhash;
 
+    // Generate the coupon code
+    const couponCode = await generateUniqueCouponCode();
+
+    // Save the coupon to Airtable with 'Pending' status
+    await saveCouponToAirtable(couponCode, 'Pending', account.toString());
+
     const payload: ActionPostResponse = await createPostResponse({
       fields: {
         transaction,
-        message: `Your coupon code is: ${code}. It is now active and ready to use.`,
+        message: `Your coupon code is: ${couponCode}. Verify your coupon in our Telegram bot @Dappshuntbot.`,
       },
     });
 
-    // Save the coupon to Airtable with 'Active' status
-    await saveCouponToAirtable(code, 'Active');
-
-    return new Response(JSON.stringify(payload), {
+    return new Response(JSON.stringify({ ...payload, couponCode }), {
       headers: {
         ...ACTIONS_CORS_HEADERS,
         'Content-Type': 'application/json'
       },
     });
   } catch (err) {
-    console.error(err);
+    console.error('Error in POST handler:', err);
     const errorMessage = err instanceof Error ? err.message : "An unknown error occurred";
     return new Response(JSON.stringify({ error: errorMessage }), {
       status: 400,
@@ -106,7 +117,7 @@ export const POST = async (req: Request): Promise<Response> => {
 };
 
 function generateUniqueCode(): string {
-  const bytes = randomBytes(8);
+  const bytes = randomBytes(16);
   const hash = createHash('sha256').update(bytes).digest('hex');
   return hash.slice(0, 12).toUpperCase();
 }
@@ -117,6 +128,7 @@ async function isCodeUnique(code: string): Promise<boolean> {
       filterByFormula: `{Code} = '${code}'`
     }).firstPage((err, records) => {
       if (err) {
+        console.error('Error checking code uniqueness:', err);
         reject(err);
         return;
       }
@@ -125,12 +137,17 @@ async function isCodeUnique(code: string): Promise<boolean> {
   });
 }
 
-async function saveCouponToAirtable(code: string, status: string): Promise<void> {
+async function saveCouponToAirtable(code: string, status: string, userAccount: string): Promise<void> {
+  const expirationTime = new Date();
+  expirationTime.setHours(expirationTime.getHours() + COUPON_EXPIRATION_HOURS);
+
   return new Promise((resolve, reject) => {
     base('Coupons').create({
       "Code": code,
       "CreatedAt": new Date().toISOString(),
       "Status": status,
+      "UserAccount": userAccount,
+      "ExpiresAt": expirationTime.toISOString()
     }, (err: Error | null) => {
       if (err) {
         console.error("Error saving coupon to Airtable:", err);
@@ -154,67 +171,3 @@ async function generateUniqueCouponCode(): Promise<string> {
   } while (!(await isCodeUnique(code)));
   return code;
 }
-
-function isPartiallyDecodedInstruction(instruction: ParsedInstruction | PartiallyDecodedInstruction): instruction is PartiallyDecodedInstruction {
-  return 'programId' in instruction && 'accounts' in instruction;
-}
-
-export const handleWebhook = async (req: Request): Promise<Response> => {
-  try {
-    const { signature } = await req.json();
-    if (!signature) {
-      throw new Error("Missing transaction signature");
-    }
-
-    const connection = new Connection(process.env.SOLANA_RPC! || clusterApiUrl("mainnet-beta"));
-
-    // Verify the transaction
-    const transaction = await connection.getParsedTransaction(signature, {
-      commitment: 'confirmed',
-    });
-
-    if (!transaction) {
-      throw new Error("Transaction not found");
-    }
-
-    // Verify transaction details
-    const instruction = transaction.transaction.message.instructions[0];
-    if (isPartiallyDecodedInstruction(instruction)) {
-      if (instruction.programId.toString() !== SystemProgram.programId.toString()) {
-        throw new Error("Invalid transaction: wrong program ID");
-      }
-
-      if (instruction.accounts[1].toString() !== RECIPIENT_ADDRESS.toString()) {
-        throw new Error("Invalid transaction: wrong recipient");
-      }
-    } else {
-      throw new Error("Invalid transaction: unexpected instruction format");
-    }
-
-    if (
-      transaction.meta?.postBalances[1] === undefined ||
-      transaction.meta?.preBalances[1] === undefined ||
-      transaction.meta.postBalances[1] - transaction.meta.preBalances[1] !== PAYMENT_AMOUNT
-    ) {
-      throw new Error("Invalid transaction: incorrect amount");
-    }
-
-    return new Response(JSON.stringify({ success: true, message: "Coupon verified successfully" }), {
-      status: 200,
-      headers: {
-        ...ACTIONS_CORS_HEADERS,
-        'Content-Type': 'application/json'
-      },
-    });
-  } catch (err) {
-    console.error(err);
-    const errorMessage = err instanceof Error ? err.message : "An unknown error occurred";
-    return new Response(JSON.stringify({ error: errorMessage }), {
-      status: 400,
-      headers: {
-        ...ACTIONS_CORS_HEADERS,
-        'Content-Type': 'application/json'
-      },
-    });
-  }
-};

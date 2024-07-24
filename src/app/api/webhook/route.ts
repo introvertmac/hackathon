@@ -1,98 +1,150 @@
-import { NextResponse } from 'next/server';
-import { Telegraf } from 'telegraf';
+import { NextApiRequest, NextApiResponse } from 'next';
+import { Telegraf, Context } from 'telegraf';
+import { Update } from 'telegraf/types';
 import Airtable from 'airtable';
+import { Connection, PublicKey, clusterApiUrl } from '@solana/web3.js';
 import fs from 'fs';
 import path from 'path';
 
-// Initialize Telegram bot
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN!);
-
-// Initialize Airtable
 const base = new Airtable({ apiKey: process.env.AIRTABLE_COUPON_API_KEY }).base(process.env.AIRTABLE_COUPON_BASE_ID!);
 
-// Helper function to normalize coupon code
-const normalizeCoupon = (code: string): string => code.trim().toUpperCase();
+const PAYMENT_AMOUNT = 0.0058 * 1e9; // 0.0058 SOL in lamports
+const RECIPIENT_ADDRESS = new PublicKey("2KsTX7z6AFR5cMjNuiWmrBSPHPk3F3tb7K5Fw14iek3t");
 
-// Helper function to check if a coupon is valid and active
-const isValidCoupon = async (code: string): Promise<{ isValid: boolean; recordId?: string }> => {
-  const records = await base('Coupons').select({
-    filterByFormula: `AND({Code} = '${code}', {Status} = 'Active')`
-  }).firstPage();
-  
-  if (records && records.length > 0) {
-    return { isValid: true, recordId: records[0].id };
-  }
-  return { isValid: false };
-};
-
-// Helper function to mark a coupon as used
-const markCouponAsUsed = async (recordId: string): Promise<void> => {
-  await base('Coupons').update([
-    {
-      id: recordId,
-      fields: {
-        UsedAt: new Date().toISOString(),
-        Status: 'Used'
-      }
-    }
-  ]);
-};
-
-// Welcome message
 bot.command('start', (ctx) => {
-  ctx.reply('Welcome to Dappshunt! 🚀\n\nWe\'re excited to have you here. Please enter your 12-character coupon code to access your report.');
+  ctx.reply('Welcome to Dappshunt! 🚀\n\nTo verify your coupon, please send your coupon code and wallet address in the following format:\n\nVERIFY couponcode walletaddress');
 });
 
-// Bot message handler
-bot.on('text', async (ctx) => {
-  const message = ctx.message.text;
-  
-  if (message && message !== '/start') {
-    const normalizedCoupon = normalizeCoupon(message);
+bot.hears(/^VERIFY\s+(\w+)\s+(\S+)$/i, async (ctx) => {
+  const couponCode = ctx.match[1].toUpperCase();
+  const walletAddress = ctx.match[2];
 
-    if (normalizedCoupon.length !== 12 || !/^[A-Z0-9]+$/.test(normalizedCoupon)) {
-      await ctx.reply('Oops! That doesn\'t look like a valid coupon code. Please enter a 12-character alphanumeric code.');
-      return;
-    }
-
-    try {
-      const { isValid, recordId } = await isValidCoupon(normalizedCoupon);
+  try {
+    const { isValid, record } = await isValidPendingCoupon(couponCode, walletAddress);
+    
+    if (isValid && record) {
+      const isPaymentConfirmed = await verifyPayment(walletAddress);
       
-      if (isValid && recordId) {
-        // Send success message
-        await ctx.reply('🎉 Fantastic! Your coupon is valid.\n\nThank you for your purchase! Your exclusive Dappshunt report is being prepared for download.');
+      if (isPaymentConfirmed) {
+        await activateCoupon(record.id);
+        await ctx.reply('🎉 Fantastic! Your coupon is now activated.\n\nThank you for your purchase! Your exclusive Dappshunt report is being prepared for download.');
         
-        // Send the report file
         const filePath = path.join(process.cwd(), 'public', 'dappshunt_report.pdf');
         await ctx.replyWithDocument({ source: fs.createReadStream(filePath), filename: 'dappshunt_report.pdf' });
         
         await ctx.reply('Enjoy your insights into the world of Indie hacking!');
-
-        // Mark coupon as used only after successfully sending the report
-        await markCouponAsUsed(recordId);
       } else {
-        await ctx.reply('Sorry, this coupon appears to be invalid or has already been used. If you believe this is an error, please contact our support team.');
+        await ctx.reply('We couldn\'t verify your payment. Please ensure you\'ve completed the transaction and try again in a few minutes.');
       }
-    } catch (error) {
-      console.error('Error processing coupon:', error);
-      await ctx.reply('Oops! We encountered an issue while processing your coupon. Please try again later or contact our support team if the problem persists.');
+    } else {
+      await ctx.reply('Sorry, this coupon appears to be invalid or has already been used. If you believe this is an error, please contact our support team.');
     }
+  } catch (error) {
+    console.error('Error processing coupon:', error);
+    await ctx.reply('Oops! We encountered an issue while processing your coupon. Please try again later or contact our support team if the problem persists.');
   }
 });
 
-// Webhook handler
-export async function POST(request: Request) {
+async function isValidPendingCoupon(code: string, walletAddress: string): Promise<{ isValid: boolean; record?: any }> {
+  return new Promise((resolve, reject) => {
+    base('Coupons').select({
+      filterByFormula: `AND({Code} = '${code}', {Status} = 'Pending', {UserAccount} = '${walletAddress}', {ExpiresAt} > NOW())`
+    }).firstPage((err, records) => {
+      if (err) {
+        console.error('Error checking coupon validity:', err);
+        reject(err);
+        return;
+      }
+      if (records && records.length > 0) {
+        resolve({ isValid: true, record: records[0] });
+      } else {
+        resolve({ isValid: false });
+      }
+    });
+  });
+}
+
+async function verifyPayment(walletAddress: string): Promise<boolean> {
+  const connection = new Connection(process.env.SOLANA_MAINNET_RPC! || clusterApiUrl("mainnet-beta"));
+  const publicKey = new PublicKey(walletAddress);
+
   try {
-    const body = await request.json();
-    await bot.handleUpdate(body);
-    return NextResponse.json({ ok: true });
+    const transactions = await connection.getSignaturesForAddress(publicKey, { limit: 10 });
+
+    for (const tx of transactions) {
+      const transaction = await connection.getParsedTransaction(tx.signature);
+      if (transaction) {
+        const instruction = transaction.transaction.message.instructions[0];
+        if ('parsed' in instruction && instruction.parsed.type === 'transfer') {
+          const { info } = instruction.parsed;
+          if (info.destination === RECIPIENT_ADDRESS.toString() && info.lamports === PAYMENT_AMOUNT) {
+            return true;
+          }
+        }
+      }
+    }
   } catch (error) {
-    console.error('Error in webhook handler:', error);
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+    console.error('Error verifying payment:', error);
+  }
+
+  return false;
+}
+
+async function activateCoupon(recordId: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    base('Coupons').update([
+      {
+        id: recordId,
+        fields: {
+          Status: 'Active',
+          ActivatedAt: new Date().toISOString()
+        }
+      }
+    ], (err) => {
+      if (err) {
+        console.error("Error activating coupon:", err);
+        reject(err);
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
+export const config = {
+  api: {
+    bodyParser: false,
+  },
+};
+
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  if (req.method === 'POST') {
+    const body = await parseBody(req);
+    try {
+      await bot.handleUpdate(body as Update);
+      res.status(200).json({ ok: true });
+    } catch (error) {
+      console.error('Error processing update:', error);
+      res.status(500).json({ error: 'Failed to process update' });
+    }
+  } else {
+    res.status(405).json({ error: 'Method not allowed' });
   }
 }
 
-// Webhook status check
-export async function GET() {
-  return NextResponse.json({ message: 'Webhook is active' });
+async function parseBody(req: NextApiRequest): Promise<any> {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.on('data', (chunk) => {
+      body += chunk.toString();
+    });
+    req.on('end', () => {
+      try {
+        resolve(JSON.parse(body));
+      } catch (error) {
+        reject(error);
+      }
+    });
+  });
 }
