@@ -15,6 +15,11 @@ export const GET = async () => {
         pathPattern: "/job",
         apiPath: "/api/actions/job",
       },
+      // Idempotent rule as the fallback
+      {
+        pathPattern: "/api/actions/**",
+        apiPath: "/api/actions/**",
+      },
     ],
   };
 
@@ -23,4 +28,6 @@ export const GET = async () => {
   });
 };
 
+// DO NOT FORGET TO INCLUDE THE `OPTIONS` HTTP METHOD
+// THIS WILL ENSURE CORS WORKS FOR BLINKS
 export const OPTIONS = GET;

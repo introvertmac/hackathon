@@ -33,12 +33,19 @@ export const GET = async (req: Request) => {
         label: "Generate Coupon",
     };
 
-    return Response.json(payload, {
-        headers: ACTIONS_CORS_HEADERS,
+    return new Response(JSON.stringify(payload), {
+        headers: {
+            ...ACTIONS_CORS_HEADERS,
+            'Content-Type': 'application/json'
+        },
     });
 };
 
-export const OPTIONS = GET;
+export const OPTIONS = async (req: Request) => {
+    return new Response(null, {
+        headers: ACTIONS_CORS_HEADERS,
+    });
+};
 
 export const POST = async (req: Request) => {
     const { searchParams } = new URL(req.url);
@@ -85,15 +92,21 @@ async function handleRegularPost(req: Request) {
             },
         });
 
-        return Response.json(payload, {
-            headers: ACTIONS_CORS_HEADERS,
+        return new Response(JSON.stringify(payload), {
+            headers: {
+                ...ACTIONS_CORS_HEADERS,
+                'Content-Type': 'application/json'
+            },
         });
     } catch (err) {
         console.error(err);
         const errorMessage = err instanceof Error ? err.message : "An unknown error occurred";
         return new Response(JSON.stringify({ error: errorMessage }), {
             status: 400,
-            headers: { ...ACTIONS_CORS_HEADERS, 'Content-Type': 'application/json' },
+            headers: {
+                ...ACTIONS_CORS_HEADERS,
+                'Content-Type': 'application/json'
+            },
         });
     }
 }
@@ -115,14 +128,20 @@ async function handleWebhook(req: Request) {
 
         return new Response(JSON.stringify({ code }), {
             status: 200,
-            headers: { ...ACTIONS_CORS_HEADERS, 'Content-Type': 'application/json' },
+            headers: {
+                ...ACTIONS_CORS_HEADERS,
+                'Content-Type': 'application/json'
+            },
         });
     } catch (err) {
         console.error(err);
         const errorMessage = err instanceof Error ? err.message : "An unknown error occurred";
         return new Response(JSON.stringify({ error: errorMessage }), {
             status: 500,
-            headers: { ...ACTIONS_CORS_HEADERS, 'Content-Type': 'application/json' },
+            headers: {
+                ...ACTIONS_CORS_HEADERS,
+                'Content-Type': 'application/json'
+            },
         });
     }
 }
