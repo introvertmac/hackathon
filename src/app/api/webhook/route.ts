@@ -1,5 +1,5 @@
-import { NextApiRequest, NextApiResponse } from 'next';
-import { Telegraf, Context } from 'telegraf';
+import { NextRequest, NextResponse } from 'next/server';
+import { Telegraf } from 'telegraf';
 import { Update } from 'telegraf/types';
 import Airtable from 'airtable';
 import { Connection, PublicKey, clusterApiUrl } from '@solana/web3.js';
@@ -112,39 +112,13 @@ async function activateCoupon(recordId: string): Promise<void> {
   });
 }
 
-export const config = {
-  api: {
-    bodyParser: false,
-  },
-};
-
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (req.method === 'POST') {
-    const body = await parseBody(req);
-    try {
-      await bot.handleUpdate(body as Update);
-      res.status(200).json({ ok: true });
-    } catch (error) {
-      console.error('Error processing update:', error);
-      res.status(500).json({ error: 'Failed to process update' });
-    }
-  } else {
-    res.status(405).json({ error: 'Method not allowed' });
+export async function POST(req: NextRequest) {
+  const body = await req.json();
+  try {
+    await bot.handleUpdate(body as Update);
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    console.error('Error processing update:', error);
+    return NextResponse.json({ error: 'Failed to process update' }, { status: 500 });
   }
-}
-
-async function parseBody(req: NextApiRequest): Promise<any> {
-  return new Promise((resolve, reject) => {
-    let body = '';
-    req.on('data', (chunk) => {
-      body += chunk.toString();
-    });
-    req.on('end', () => {
-      try {
-        resolve(JSON.parse(body));
-      } catch (error) {
-        reject(error);
-      }
-    });
-  });
 }
