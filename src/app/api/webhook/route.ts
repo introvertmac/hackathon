@@ -181,7 +181,7 @@ async function activateCoupon(recordId: string): Promise<void> {
         id: recordId,
         fields: {
           Status: 'Used',
-          ActivatedAt: new Date().toISOString()
+          UsedAt: new Date().toISOString()
         }
       }
     ], (err) => {
