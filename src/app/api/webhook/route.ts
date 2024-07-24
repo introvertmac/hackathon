@@ -2,13 +2,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Telegraf, Context, Markup } from 'telegraf';
 import { Update, Message } from 'telegraf/types';
 import Airtable from 'airtable';
-import { PublicKey } from '@solana/web3.js';
+import { PublicKey, Connection } from '@solana/web3.js';
 import fs from 'fs';
 import path from 'path';
 
 // Initialize bot and database connection
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN!);
 const base = new Airtable({ apiKey: process.env.AIRTABLE_COUPON_API_KEY }).base(process.env.AIRTABLE_COUPON_BASE_ID!);
+const solanaRpcUrl = process.env.SOLANA_MAINNET_RPC!;
+const connection = new Connection(solanaRpcUrl);
 
 // Custom keyboard markup
 const mainKeyboard = Markup.keyboard([
@@ -17,8 +19,9 @@ const mainKeyboard = Markup.keyboard([
 
 // User state management
 type UserState = {
-  step: 'IDLE' | 'COUPON' | 'WALLET';
+  step: 'IDLE' | 'COUPON' | 'WALLET' | 'SIGNATURE';
   couponCode?: string;
+  walletAddress?: string;
 };
 
 const userStates = new Map<number, UserState>();
@@ -62,6 +65,8 @@ bot.on('text', async (ctx) => {
     await handleCouponInput(ctx, userId, userState);
   } else if (userState.step === 'WALLET') {
     await handleWalletInput(ctx, userId, userState);
+  } else if (userState.step === 'SIGNATURE') {
+    await handleSignatureInput(ctx, userId, userState);
   } else {
     ctx.reply('Please use the buttons to start or verify your coupon.', mainKeyboard);
   }
@@ -75,6 +80,8 @@ async function handleCouponInput(ctx: Context, userId: number, userState: UserSt
     ctx.reply('Oops! That doesn\'t look like a valid coupon code. Please enter a 12-character alphanumeric code.');
     return;
   }
+
+  ctx.reply('Checking your coupon code, please wait...');
 
   const isValidCoupon = await checkCouponValidity(couponCode);
   if (!isValidCoupon) {
@@ -103,10 +110,35 @@ async function handleWalletInput(ctx: Context, userId: number, userState: UserSt
     return;
   }
 
+  userStates.set(userId, { step: 'SIGNATURE', couponCode, walletAddress });
+  ctx.reply('Please enter the transaction signature. You can find it in your wallet transaction history or on the Solscan transaction page.');
+}
+
+async function handleSignatureInput(ctx: Context, userId: number, userState: UserState) {
+  const message = ctx.message as Message.TextMessage;
+  const signature = message.text.trim();
+
+  const { couponCode, walletAddress } = userState;
+
+  if (!couponCode || !walletAddress) {
+    ctx.reply('Sorry, there was an error processing your request. Please start over.', mainKeyboard);
+    userStates.set(userId, { step: 'IDLE' });
+    return;
+  }
+
+  ctx.reply('Verifying your transaction signature, please wait...');
+
+  const isSignatureValid = await checkSignature(walletAddress, signature);
+  if (!isSignatureValid) {
+    ctx.reply('Sorry, this transaction signature is not valid for the provided wallet address. Please check your details and try again.');
+    userStates.set(userId, { step: 'IDLE' });
+    return;
+  }
+
   const verificationResult = await verifyCoupon(couponCode, walletAddress);
 
   if (verificationResult.isValid && verificationResult.recordId) {
-    await activateCoupon(verificationResult.recordId);
+    await activateCoupon(verificationResult.recordId, signature);
     await ctx.reply('🎉 Congratulations! Your coupon has been successfully verified and activated.');
     
     // Send the report file
@@ -174,14 +206,28 @@ async function verifyCoupon(code: string, walletAddress: string): Promise<{ isVa
   });
 }
 
-async function activateCoupon(recordId: string): Promise<void> {
+async function checkSignature(walletAddress: string, signature: string): Promise<boolean> {
+  try {
+    const transaction = await connection.getTransaction(signature);
+    if (transaction && transaction.transaction.message.accountKeys.some(key => key.toString() === walletAddress)) {
+      return true;
+    }
+    return false;
+  } catch (error) {
+    console.error('Error checking signature:', error);
+    return false;
+  }
+}
+
+async function activateCoupon(recordId: string, signature: string): Promise<void> {
   return new Promise((resolve, reject) => {
     base('Coupons').update([
       {
         id: recordId,
         fields: {
           Status: 'Used',
-          UsedAt: new Date().toISOString()
+          UsedAt: new Date().toISOString(),
+          Signature: signature
         }
       }
     ], (err) => {
