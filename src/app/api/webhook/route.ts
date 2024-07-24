@@ -34,11 +34,22 @@ I'm here to help you verify your coupon and unlock your exclusive Dappshunt repo
 Use the buttons below to start or verify your coupon. Let's get started!
 `;
 
+// Default message when the user first visits the bot
+const defaultMessage = `
+Hello and welcome to the Dappshunt Coupon Verification Bot! 🤖
+
+I'm here to assist you in verifying your coupon to unlock exclusive content. Here's what you can do:
+- Click '🚀 Start' to get a brief overview of this bot.
+- Click '🔍 Verify Coupon' to start the coupon verification process.
+
+If you have any questions, feel free to ask!
+`;
+
 bot.command('start', (ctx) => {
   const userId = ctx.from?.id;
   if (userId) {
     userStates.set(userId, { step: 'IDLE' });
-    ctx.reply(welcomeMessage, mainKeyboard);
+    ctx.reply(defaultMessage, mainKeyboard);
   }
 });
 
@@ -74,12 +85,12 @@ async function handleCouponInput(ctx: Context, userId: number, userState: UserSt
   const couponCode = message.text.trim().toUpperCase();
 
   if (couponCode.length !== 12 || !/^[A-Z0-9]+$/.test(couponCode)) {
-    return sendErrorMessage(ctx, 'Oops! That doesn\'t look like a valid coupon code. Please enter a 12-character alphanumeric code.');
+    return sendErrorMessage(ctx, 'Oops! That doesn\'t look like a valid coupon code. Please enter a 12-character alphanumeric code.', '🔍 Verify Coupon');
   }
 
   const isCouponValid = await checkCouponValidity(couponCode);
   if (!isCouponValid) {
-    return sendErrorMessage(ctx, 'Sorry, this coupon code is not valid or has already been used. Please check your code and try again.');
+    return sendErrorMessage(ctx, 'Sorry, this coupon code is not valid or has already been used. Please check your code and try again.', '🔍 Verify Coupon');
   }
 
   userStates.set(userId, { step: 'SIGNATURE', couponCode });
@@ -93,11 +104,11 @@ async function handleSignatureInput(ctx: Context, userId: number, userState: Use
   const { couponCode } = userState;
 
   if (!couponCode) {
-    return sendErrorMessage(ctx, 'Sorry, there was an error processing your request. Please start over.');
+    return sendErrorMessage(ctx, 'Sorry, there was an error processing your request. Please start over.', '🔍 Verify Coupon');
   }
 
   if (!isValidSignatureFormat(signature)) {
-    return sendErrorMessage(ctx, 'That doesn\'t look like a valid Solana transaction signature. Please double-check and try again.');
+    return sendErrorMessage(ctx, 'That doesn\'t look like a valid Solana transaction signature. Please double-check and try again.', '🔍 Verify Coupon');
   }
 
   ctx.reply('Verifying your transaction signature, please wait...');
@@ -119,14 +130,14 @@ async function handleSignatureInput(ctx: Context, userId: number, userState: Use
       mainKeyboard
     );
   } else {
-    sendErrorMessage(ctx, 'Sorry, we couldn\'t verify your coupon with the provided signature. Please make sure you\'re using the correct transaction signature. If you continue to have issues, please contact our support team.');
+    sendErrorMessage(ctx, 'Sorry, the transaction signature is not valid for the provided coupon. Please ensure you\'re using the correct signature. Start the verification process again by clicking the button below.', '🔍 Verify Coupon');
   }
 
   userStates.set(userId, { step: 'IDLE' });
 }
 
 function isValidSignatureFormat(signature: string): boolean {
-  return /^[A-Za-z0-9]{88}$/.test(signature);
+  return /^[A-Za-z0-9]{87,88}$/.test(signature);
 }
 
 async function checkCouponValidity(code: string): Promise<boolean> {
@@ -205,8 +216,11 @@ async function activateCoupon(recordId: string, signature: string): Promise<void
   });
 }
 
-function sendErrorMessage(ctx: Context, message: string) {
-  ctx.reply(message, mainKeyboard);
+function sendErrorMessage(ctx: Context, message: string, retryButton: string) {
+  ctx.reply(
+    `${message}\n\nClick the button below to try again.`,
+    Markup.keyboard([retryButton]).resize()
+  );
   const userId = ctx.from?.id;
   if (userId) {
     userStates.set(userId, { step: 'IDLE' });
