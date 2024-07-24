@@ -66,7 +66,7 @@ bot.on('text', async (ctx) => {
         const filePath = path.join(process.cwd(), 'public', 'dappshunt_report.pdf');
         await ctx.replyWithDocument({ source: fs.createReadStream(filePath), filename: 'dappshunt_report.pdf' });
         
-        await ctx.reply('Enjoy your insights into the world of dapps!');
+        await ctx.reply('Enjoy your insights into the world of Indie hacking!');
 
         // Mark coupon as used only after successfully sending the report
         await markCouponAsUsed(recordId);
