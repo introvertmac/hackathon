@@ -8,6 +8,10 @@ export const GET = async () => {
         apiPath: "/api/actions/analyze",
       },
       {
+        pathPattern: "/coupon",
+        apiPath: "/api/actions/coupon",
+      },
+      {
         pathPattern: "/job",
         apiPath: "/api/actions/job",
       },
