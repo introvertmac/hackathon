@@ -79,7 +79,7 @@ export const POST = async (req: Request): Promise<Response> => {
     const payload: ActionPostResponse = await createPostResponse({
       fields: {
         transaction,
-        message: `Your coupon code is: ${couponCode} | Verify your coupon in our Telegram bot @Dappshuntbot.`,
+        message: `Your coupon code is: ${couponCode} || Verify your coupon in our Telegram bot @Dappshuntbot.`,
       },
     });
 
