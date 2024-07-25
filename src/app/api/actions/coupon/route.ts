@@ -42,11 +42,7 @@ export const GET = async (req: Request): Promise<Response> => {
   });
 };
 
-export const OPTIONS = async (): Promise<Response> => {
-  return new Response(null, {
-    headers: ACTIONS_CORS_HEADERS,
-  });
-};
+export const OPTIONS = GET;
 
 export const POST = async (req: Request): Promise<Response> => {
   try {
@@ -87,7 +83,7 @@ export const POST = async (req: Request): Promise<Response> => {
       },
     });
 
-    return new Response(JSON.stringify({ ...payload, couponCode }), {
+    return new Response(JSON.stringify(payload), {
       headers: {
         ...ACTIONS_CORS_HEADERS,
         'Content-Type': 'application/json'
