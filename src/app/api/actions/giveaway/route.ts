@@ -163,7 +163,7 @@ import {
   
   async function checkExistingProfile(walletAddress: string): Promise<boolean> {
     return new Promise((resolve, reject) => {
-      base('Job Board').select({
+      base('Giveaway').select({
         filterByFormula: `{Wallet Address} = '${walletAddress}'`
       }).firstPage((err, records) => {
         if (err) {
