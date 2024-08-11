@@ -21,18 +21,20 @@ import {
   const connection = new Connection(clusterApiUrl("mainnet-beta"));
   
   type Skill = 'Frontend' | 'Backend' | 'Design' | 'Any';
+  type VerificationStatus = 'Verified' | 'Unverified';
   
   interface UserProfile {
     discordUsername: string;
     skill: Skill;
     lookingFor: Skill;
+    verificationStatus: VerificationStatus;
   }
   
   export const GET = async (req: Request): Promise<Response> => {
     const payload: ActionGetResponse = {
       title: "Hackathon Buddy Finder",
-      icon: new URL("/jack.jpeg", new URL(req.url).origin).toString(),
-      description: "Enter your details in the format: yourskill:discordusername:find:desiredskill (e.g., frontend:user123:find:backend)",
+      icon: new URL("/jack.png", new URL(req.url).origin).toString(),
+      description: "Enter your details in the format: [username] [skill initial] > [desired skill initial]\nUse F for Frontend, B for Backend, D for Design, A for Any\nExample: JohnDoe F > B",
       label: "Find Buddy",
       links: {
         actions: [
@@ -42,7 +44,7 @@ import {
             parameters: [
               {
                 name: "input",
-                label: "Enter in format: yourskill:discordusername:find:desiredskill",
+                label: "[username] [skill initial] > [desired skill initial]",
                 required: true,
               },
             ],
@@ -80,7 +82,7 @@ import {
   
       const user = parseUserInput(input);
       if (!user) {
-        throw new Error("Invalid input format. Please use: yourskill:discordusername:find:desiredskill");
+        throw new Error("Invalid input format. Please use: [username] [skill initial] > [desired skill initial]");
       }
   
       const result = await matchHackathonBuddy(user);
@@ -111,7 +113,7 @@ import {
   
       const estimatedFee = estimatedFeeResponse.value;
   
-      const messageText = `${result} Estimated transaction fee: ${(estimatedFee / LAMPORTS_PER_SOL).toFixed(6)} SOL.`;
+      const messageText = `${result}`;
   
       const payload: ActionPostResponse = await createPostResponse({
         fields: {
@@ -136,20 +138,25 @@ import {
   
   function parseUserInput(input: string): UserProfile | null {
     try {
-      const parts = input.split(':');
-      if (parts.length !== 4) throw new Error("Invalid input format");
+      const parts = input.trim().split(/\s+/);
+      if (parts.length !== 4 || parts[2] !== '>') {
+        throw new Error("Invalid input format");
+      }
   
-      const [skill, discordUsername, action, lookingFor] = parts.map(part => part.trim());
-      if (action.toLowerCase() !== 'find') throw new Error("Invalid action");
+      const [discordUsername, skillInitial, , lookingForInitial] = parts;
   
-      if (!isValidSkill(skill) || !isValidSkill(lookingFor)) {
+      const skill = parseSkill(skillInitial);
+      const lookingFor = parseSkill(lookingForInitial);
+  
+      if (!skill || !lookingFor) {
         throw new Error("Invalid skill");
       }
   
       return {
         discordUsername,
-        skill: capitalizeFirstLetter(skill) as Skill,
-        lookingFor: capitalizeFirstLetter(lookingFor) as Skill,
+        skill,
+        lookingFor,
+        verificationStatus: 'Unverified', // Default status for new users
       };
     } catch (error) {
       console.error("Error parsing user input:", error);
@@ -157,13 +164,14 @@ import {
     }
   }
   
-  function isValidSkill(skill: string): boolean {
-    const validSkills: Skill[] = ['Frontend', 'Backend', 'Design', 'Any'];
-    return validSkills.includes(capitalizeFirstLetter(skill) as Skill);
-  }
-  
-  function capitalizeFirstLetter(string: string): string {
-    return string.charAt(0).toUpperCase() + string.slice(1).toLowerCase();
+  function parseSkill(initial: string): Skill | null {
+    switch (initial.toUpperCase()) {
+      case 'F': return 'Frontend';
+      case 'B': return 'Backend';
+      case 'D': return 'Design';
+      case 'A': return 'Any';
+      default: return null;
+    }
   }
   
   async function matchHackathonBuddy(user: UserProfile): Promise<string> {
@@ -174,7 +182,8 @@ import {
         if (existingUser.get('Match Status') === 'Matched') {
           const partnerId = existingUser.get('Partner ID') as string;
           const partner = await table.find(partnerId);
-          return `You already have a match! Your hackathon buddy is ${partner.get('Discord Username')} (${partner.get('Skill')}).`;
+          const partnerVerificationStatus = partner.get('Verification Status') as VerificationStatus;
+          return `You already have a match! Your hackathon buddy is ${partner.get('Discord Username')} (${partner.get('Skill')}) - ${partnerVerificationStatus}.`;
         } else {
           // Update existing user's preferences
           await updateUserProfile(existingUser.id, user);
@@ -190,7 +199,8 @@ import {
       if (match) {
         // Update both users with their partner IDs
         await updateMatchedUsers(existingUser ? existingUser.id : (await getUserByDiscordUsername(user.discordUsername))!.id, match.id);
-        return `Match found! Your hackathon buddy is ${match.get('Discord Username')} (${match.get('Skill')}).`;
+        const matchVerificationStatus = match.get('Verification Status') as VerificationStatus;
+        return `Match found! Your hackathon buddy is ${match.get('Discord Username')} (${match.get('Skill')}) - User is ${matchVerificationStatus}.`;
       } else {
         return "No match found yet. We've added you to our database and will notify you when a match is found.";
       }
@@ -250,6 +260,7 @@ import {
             'Looking For': user.lookingFor,
             'Partner ID': '',
             'Match Status': 'Unmatched',
+            'Verification Status': 'Unverified',
             'Notes': '',
           },
         },
@@ -270,6 +281,7 @@ import {
             'Looking For': user.lookingFor,
             'Match Status': 'Unmatched',
             'Partner ID': '',
+            // Note: We're not updating 'Verification Status' here as it should only be changed by admin
           },
         },
       ]);
